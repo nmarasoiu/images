@@ -12,7 +12,6 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
 
 public class DefaultImageResizing implements ImageResizing {
     private final Path basePath;
@@ -23,22 +22,38 @@ public class DefaultImageResizing implements ImageResizing {
 
     //returns ResizedImageFilePath
     public Path scale(Path imagePath, int x, int y) {
+        File resizedFile = resizedFile(imagePath, x, y);
+        if (resizedFile.exists()) {
+            //already exists and finalized; assuming immutable images (are not updated)
+            return resizedFile.toPath();
+        }
+        //writing into a temp file the resized img and then rename it to final name_size.ext
+        File temporaryFile = new File(resizedFile.getPath() + ".temporary");
         try {
+            if(temporaryFile.exists()) {
+                //another writer is generating resized image; wait for it and retry
+                while (temporaryFile.exists()) {
+                    Thread.sleep(300);
+                }
+                return scale(imagePath, x, y);
+            }
             BufferedImage image = getImage(imagePath);
-            Future<BufferedImage> resizedImageFuture = AsyncScalr.resize(image, Scalr.Method.QUALITY, Scalr.Mode.FIT_EXACT, x, y);
-            BufferedImage bufferedImage = resizedImageFuture.get();
-            File outputFile = resizedFile(imagePath, x, y);
-            if (!outputFile.exists()) {
-                outputFile.createNewFile();//should not be necessary
-            }
-            String fileName = outputFile.getName();
+            //async.get makes sense because a limited thread pool is used in AsyncScalr
+            BufferedImage bufferedImage =
+                    AsyncScalr.resize(image, Scalr.Method.QUALITY, Scalr.Mode.FIT_EXACT, x, y).get();
+//            temporaryFile.createNewFile();//should not be necessary
+            String fileName = resizedFile.getName();
             String extension = fileName.substring(fileName.lastIndexOf(".") + 1);
-            if(ImageIO.write(bufferedImage, extension, outputFile)){
-                new File(outputFile.getPath()+".ok").createNewFile();
-            }
-            return Paths.get(outputFile.toURI());
+            ImageIO.write(bufferedImage, extension, temporaryFile);
+            temporaryFile.renameTo(resizedFile);
+            return resizedFile.toPath();
         } catch (InterruptedException | ExecutionException | IOException e) {
             throw new RuntimeException(e);
+        } finally {
+            try {
+                temporaryFile.delete();
+            } catch (Exception ignore) {
+            }
         }
     }
 

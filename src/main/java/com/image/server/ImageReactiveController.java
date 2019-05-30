@@ -14,10 +14,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 
-import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Optional;
@@ -44,14 +42,7 @@ public class ImageReactiveController {
             Optional<int[]> sizeXYOpt = parseSize(size);
             if (sizeXYOpt.isPresent()) {
                 int[] xy = sizeXYOpt.get();
-                int x = xy[0];
-                int y = xy[1];
-                File resizedFile = imageResizing.resizedFile(path, x, y);
-                File resizedFileComplete = new File(resizedFile.getPath()+".ok");
-                if(resizedFileComplete.exists()){
-                    return streamFileAsFluxResponseEntity(resizedFile.toPath());
-                }
-                Path scaledPath = imageResizing.scale(path, x, y);
+                Path scaledPath = imageResizing.scale(path, xy[0], xy[1]);
                 return streamFileAsFluxResponseEntity(scaledPath);
             } else {
                 return badReqEntity();
@@ -62,10 +53,6 @@ public class ImageReactiveController {
 
     private ResponseEntity<Flux<DataBuffer>> streamFileAsFluxResponseEntity(Path path) {
         Flux<DataBuffer> imageStream = fileRepository.readImageFromDisk(path);
-        return getBody(path, imageStream);
-    }
-
-    private ResponseEntity<Flux<DataBuffer>> getBody(Path path, Flux<DataBuffer> imageStream) {
         return ResponseEntity
                 .status(HttpStatus.OK)
                 .contentType(getContentType(path))

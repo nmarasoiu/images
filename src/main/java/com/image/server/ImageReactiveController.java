@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -35,28 +36,31 @@ public class ImageReactiveController {
     }
 
     @GetMapping(path = "/image/{path}")
-    public ResponseEntity<Flux<DataBuffer>> streamImage(@PathVariable Path path,
+    public Mono<ResponseEntity<Flux<DataBuffer>>> streamImage(@PathVariable Path path,
                                                         @RequestParam(required = false) String size) {
 
         if (size != null) {
             Optional<int[]> sizeXYOpt = parseSize(size);
             if (sizeXYOpt.isPresent()) {
                 int[] xy = sizeXYOpt.get();
-                Path scaledPath = imageResizing.scale(path, xy[0], xy[1]);
-                return streamFileAsFluxResponseEntity(scaledPath);
+                Mono<Path> scaledPathFlux = imageResizing.scale(path, xy[0], xy[1]);
+                return streamFileAsFluxResponseEntity(scaledPathFlux);
             } else {
-                return badReqEntity();
+                return Mono.just(badReqEntity());
             }
         }
-        return streamFileAsFluxResponseEntity(path);
+        return streamFileAsFluxResponseEntity(Mono.just(path));
     }
 
-    private ResponseEntity<Flux<DataBuffer>> streamFileAsFluxResponseEntity(Path path) {
-        Flux<DataBuffer> imageStream = fileRepository.readImageFromDisk(path);
-        return ResponseEntity
-                .status(HttpStatus.OK)
-                .contentType(getContentType(path))
-                .body(imageStream);
+    private Mono<ResponseEntity<Flux<DataBuffer>>> streamFileAsFluxResponseEntity(Mono<Path> pathFlux) {
+        return pathFlux
+                    .map(path -> {
+                        Flux<DataBuffer> imageStream = fileRepository.readImageFromDisk(path);
+                        return ResponseEntity
+                                .status(HttpStatus.OK)
+                                .contentType(getContentType(path))
+                                .body(imageStream);
+                    });
     }
 
     private Optional<int[]> parseSize(@RequestParam(required = false) String size) {

@@ -1,53 +1,68 @@
 package com.image.server;
 
-import org.imgscalr.AsyncScalr;
 import org.imgscalr.Scalr;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Scheduler;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.concurrent.ExecutionException;
+import java.time.Duration;
+import java.time.temporal.ChronoUnit;
 
 public class DefaultImageResizing implements ImageResizing {
     private final Path basePath;
+    private final Scheduler resizingScheduler;
 
-    DefaultImageResizing(Path basePath) {
+    DefaultImageResizing(Path basePath, Scheduler resizingScheduler) {
         this.basePath = basePath;
+        this.resizingScheduler = resizingScheduler;
     }
 
     //returns ResizedImageFilePath
-    public Path scale(Path imagePath, int x, int y) {
+    public Mono<Path> scale(Path imagePath, int x, int y) {
         File resizedFile = resizedFile(imagePath, x, y);
         if (resizedFile.exists()) {
             //already exists and finalized; assuming immutable images (are not updated)
-            return resizedFile.toPath();
+            return Mono.fromSupplier(resizedFile::toPath);
         }
         //writing into a temp file the resized img and then rename it to final name_size.ext
-        File temporaryFile = new File(resizedFile.getPath() + ".temporary");
+        String temporaryFilePath = resizedFile.getPath() + ".temporary";
+        File temporaryFile = new File(temporaryFilePath);
+        if (temporaryFile.exists()) {
+            return Flux
+                    .interval(Duration.of(50, ChronoUnit.MILLIS))
+                    .filter(i -> !new File(temporaryFilePath).exists())
+                    .take(1)
+                    .next()
+                    .flatMap(a -> scale(imagePath, x, y));
+        }
+        return Mono
+                .fromSupplier(() -> resize(imagePath, x, y, resizedFile, temporaryFile))
+                .subscribeOn(resizingScheduler)
+                .publishOn(resizingScheduler);
+    }
+
+    private Path resize(Path imagePath, int x, int y, File resizedFile, File temporaryFile) {
         try {
-            if(temporaryFile.exists()) {
-                //another writer is generating resized image; wait for it and retry
-                while (temporaryFile.exists()) {
-                    Thread.sleep(300);
-                }
-                return scale(imagePath, x, y);
-            }
             BufferedImage image = getImage(imagePath);
-            //async.get makes sense because a limited thread pool is used in AsyncScalr
-            BufferedImage bufferedImage =
-                    AsyncScalr.resize(image, Scalr.Method.QUALITY, Scalr.Mode.FIT_EXACT, x, y).get();
+            BufferedImage bufferedImage = Scalr.resize(image, Scalr.Method.QUALITY, Scalr.Mode.FIT_EXACT, x, y);
 //            temporaryFile.createNewFile();//should not be necessary
             String fileName = resizedFile.getName();
             String extension = fileName.substring(fileName.lastIndexOf(".") + 1);
             ImageIO.write(bufferedImage, extension, temporaryFile);
             temporaryFile.renameTo(resizedFile);
             return resizedFile.toPath();
-        } catch (InterruptedException | ExecutionException | IOException e) {
+        } catch (IOException e) {
+            try {
+                resizedFile.delete();
+            } catch (Exception ignore) {
+            }
             throw new RuntimeException(e);
         } finally {
             try {

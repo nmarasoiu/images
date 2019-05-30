@@ -6,9 +6,10 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.io.buffer.DataBufferFactory;
 import org.springframework.core.io.buffer.DefaultDataBufferFactory;
+import reactor.core.scheduler.Schedulers;
 
 import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.util.concurrent.Executors;
 
 @SpringBootApplication
 public class ServerApplication {
@@ -21,7 +22,8 @@ public class ServerApplication {
 
     @Bean
     public ImageResizing imageResizing() {
-        return new DefaultImageResizing(basePath);
+        int resizingThreadCount = Runtime.getRuntime().availableProcessors();
+        return new DefaultImageResizing(basePath, Schedulers.fromExecutorService(Executors.newFixedThreadPool(resizingThreadCount)));
     }
 
     @Bean

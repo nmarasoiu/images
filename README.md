@@ -1,5 +1,5 @@
 # images
-It works with local files but mounting a NFS e.g. a Ceph container nearby in the same pod, or AWS EFS Elastic Filesystem, would replicate the files and make them accessible from all the nodes.
+It works with local files but mounting a NFS e.g. a Ceph or Gluster distributed fs container nearby in the same pod, or AWS EFS Elastic Filesystem, would replicate the files and make them accessible from all the nodes. Should optimize for rapid access to many small files like typical photos are (for sure small compared to optimal file sizes for GlusterFs or HDFS).
 
 How resized images cache works. The cached files are not yet deleted, so not fully a cache.
 When a resize is requested and a file like image_290x239.jpg is not available;

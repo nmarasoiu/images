@@ -29,6 +29,11 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-webflux</artifactId>
 		</dependency>
+		<!--<dependency>
+			<groupId>org.dcache</groupId>
+			<artifactId>nfs4j-core</artifactId>
+			<version>0.18.2</version>
+		</dependency>-->
 <!--		<dependency>
 			<groupId>org.springframework</groupId>
 			<artifactId>spring-webmvc</artifactId>

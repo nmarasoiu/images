@@ -34,6 +34,7 @@ public class DefaultImageResizing implements ImageResizing {
         //writing into a temp file the resized img and then rename it to final name_size.ext
         String temporaryFilePath = resizedFile.getPath() + ".temporary";
         File temporaryFile = new File(temporaryFilePath);
+        temporaryFile.deleteOnExit();
         if (temporaryFile.exists()) {
             return Flux
                     .interval(Duration.of(50, ChronoUnit.MILLIS))
@@ -48,30 +49,6 @@ public class DefaultImageResizing implements ImageResizing {
                 .publishOn(resizingScheduler);
     }
 
-    private Path resize(Path imagePath, int x, int y, File resizedFile, File temporaryFile) {
-        try {
-            BufferedImage image = getImage(imagePath);
-            BufferedImage bufferedImage = Scalr.resize(image, Scalr.Method.QUALITY, Scalr.Mode.FIT_EXACT, x, y);
-//            temporaryFile.createNewFile();//should not be necessary
-            String fileName = resizedFile.getName();
-            String extension = fileName.substring(fileName.lastIndexOf(".") + 1);
-            ImageIO.write(bufferedImage, extension, temporaryFile);
-            temporaryFile.renameTo(resizedFile);
-            return resizedFile.toPath();
-        } catch (IOException e) {
-            try {
-                resizedFile.delete();
-            } catch (Exception ignore) {
-            }
-            throw new RuntimeException(e);
-        } finally {
-            try {
-                temporaryFile.delete();
-            } catch (Exception ignore) {
-            }
-        }
-    }
-
     public File resizedFile(Path imagePath, int x, int y) {
         String fileName = imagePath.getFileName().toString();
         int dotIndex = fileName.lastIndexOf(".");
@@ -81,10 +58,32 @@ public class DefaultImageResizing implements ImageResizing {
         return new File(basePath.resolve(outputFileName).toString());
     }
 
+    private Path resize(Path imagePath, int x, int y, File resizedFile, File temporaryFile) {
+        try {
+            BufferedImage image = getImage(imagePath);
+            BufferedImage bufferedImage = Scalr.resize(image, Scalr.Method.QUALITY, Scalr.Mode.FIT_EXACT, x, y);
+            String fileName = resizedFile.getName();
+            String extension = fileName.substring(fileName.lastIndexOf(".") + 1);
+            ImageIO.write(bufferedImage, extension, temporaryFile);
+            temporaryFile.renameTo(resizedFile);
+            return resizedFile.toPath();
+        } catch (IOException e) {
+            delete(resizedFile);
+            delete(temporaryFile);
+            throw new RuntimeException(e);
+        }
+    }
 
     private BufferedImage getImage(Path filename) throws IOException {
         Path filePath = basePath.resolve(filename);
         Resource resource = new FileSystemResource(filePath);
         return ImageIO.read(resource.getInputStream());
+    }
+
+    private void delete(File file) {
+        try {
+            file.delete();
+        } catch (Exception ignore) {
+        }
     }
 }

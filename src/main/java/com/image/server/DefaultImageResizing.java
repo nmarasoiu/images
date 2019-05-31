@@ -15,10 +15,12 @@ import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
+import java.util.Random;
 
 public class DefaultImageResizing implements ImageResizing {
     private final Path basePath;
     private final Scheduler resizingScheduler;
+    private final Random random = new Random();
 
     DefaultImageResizing(Path basePath, Scheduler resizingScheduler) {
         this.basePath = basePath;
@@ -37,7 +39,7 @@ public class DefaultImageResizing implements ImageResizing {
                         return Mono.just(resizedFile.toPath());
                     }
                     //writing into a temp file the resized img and then rename it to final name_size.ext
-                    String temporaryFilePath = resizedFile.getPath() + ".temporary";
+                    String temporaryFilePath = resizedFile.getPath() + "." +random.nextLong() +".temporary";
                     File temporaryFile = new File(temporaryFilePath);
                     try {
                         //CAS like atomic operation; alternatively, FileLock but filesystem/platform dependent

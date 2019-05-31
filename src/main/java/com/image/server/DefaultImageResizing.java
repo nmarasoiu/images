@@ -15,49 +15,44 @@ import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
-import java.util.Random;
 
 public class DefaultImageResizing implements ImageResizing {
     private final Path basePath;
-    private final Scheduler resizingScheduler;
+    private final BlockingExecution blockingExecution;
 
-    DefaultImageResizing(Path basePath, Scheduler resizingScheduler) {
+    DefaultImageResizing(Path basePath, BlockingExecution blockingExecution) {
         this.basePath = basePath;
-        this.resizingScheduler = resizingScheduler;
+        this.blockingExecution = blockingExecution;
     }
 
     //returns ResizedImageFilePath
     public Mono<Path> scale(Path imagePath, int x, int y) {
-        return Mono
-                .just(1)
-                .subscribeOn(resizingScheduler)
-                .flatMap(ignored -> {
-                    File resizedFile = resizedFile(imagePath, x, y);
-                    if (resizedFile.exists()) {
-                        //already exists and finalized; assuming immutable images (are not updated)
-                        return Mono.just(resizedFile.toPath());
-                    }
-                    //writing into a temp file the resized img and then rename it to final name_size.ext
-                    String temporaryFilePath = resizedFile.getPath() +".temporary";
-                    File temporaryFile = new File(temporaryFilePath);
-                    try {
-                        //CAS like atomic operation; alternatively, FileLock but filesystem/platform dependent
-                        boolean wasCreated = temporaryFile.createNewFile();
-                        if (wasCreated) {
-                            return Mono.just(resize(imagePath, x, y, resizedFile, temporaryFile));
-                        }
-                    } catch (IOException e) {
-                        throw new UncheckedIOException(e);
-                    }
-                    //already existed; another thread is doing the resize for this image; poll asynchronously until done
-                    return Flux
-                            .interval(Duration.of(50, ChronoUnit.MILLIS))
-                            .filter(ignore -> !new File(temporaryFilePath).exists())
-                            .take(1)
-                            .next()
-                            .flatMap(a -> scale(imagePath, x, y));
-
-                });
+        return blockingExecution.scheduleBlockingMono(() -> {
+            File resizedFile = resizedFile(imagePath, x, y);
+            if (resizedFile.exists()) {
+                //already exists and finalized; assuming immutable images (are not updated)
+                return Mono.just(resizedFile.toPath());
+            }
+            //writing into a temp file the resized img and then rename it to final name_size.ext
+            String temporaryFilePath = resizedFile.getPath() + ".temporary";
+            File temporaryFile = new File(temporaryFilePath);
+            try {
+                //CAS like atomic operation; alternatively, FileLock but filesystem/platform dependent
+                boolean wasCreated = temporaryFile.createNewFile();
+                if (wasCreated) {
+                    return Mono.just(resize(imagePath, x, y, resizedFile, temporaryFile));
+                }
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+            //already existed; another thread is doing the resize for this image; poll asynchronously until done
+            return Flux
+                    .interval(Duration.of(50, ChronoUnit.MILLIS))
+                    .filter(ignore -> !new File(temporaryFilePath).exists())
+                    .take(1)
+                    .next()
+                    .flatMap(a -> scale(imagePath, x, y));
+        });
     }
 
     public File resizedFile(Path imagePath, int x, int y) {

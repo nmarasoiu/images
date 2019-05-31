@@ -1,7 +1,6 @@
 package com.image.server;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.sun.el.lang.ELArithmetic;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferFactory;
@@ -22,22 +21,27 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Optional;
+import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 @RestController
 public class ImageReactiveController {
-    private final FileRepository fileRepository;
+    private final Pattern digitsPattern=Pattern.compile("[0-9]+");
     private final ImageResizing imageResizing;
+    private final FileRepository fileRepository;
     private final DataBufferFactory dataBufferFactory;
+    private final BlockingExecution blockingExecution;
     private final int maxSizeForResize;
     private final int minFreeBytesForResize;
 
     public ImageReactiveController(FileRepository fileRepository, ImageResizing imageResizing,
-                                   DataBufferFactory dataBufferFactory,
-                                   @Value("${maxSizeForResize:4500}") int maxSizeForResize,
-                                   @Value("${minFreeBytesForResize:134217728}") int minFreeBytesForResize) {
+                                   DataBufferFactory dataBufferFactory, BlockingExecution blockingExecution,
+                                   @Value("${maxSizeForResize:9999}") int maxSizeForResize,
+                                   @Value("${minFreeBytesForResize:734217728}") int minFreeBytesForResize) {
         this.fileRepository = fileRepository;
         this.imageResizing = imageResizing;
         this.dataBufferFactory = dataBufferFactory;
+        this.blockingExecution = blockingExecution;
         this.maxSizeForResize = maxSizeForResize;
         this.minFreeBytesForResize = minFreeBytesForResize;
     }
@@ -45,34 +49,46 @@ public class ImageReactiveController {
     @GetMapping(path = "/image/{path}")
     public Mono<ResponseEntity<Flux<DataBuffer>>> streamImage(@PathVariable(name = "path") Path imageRelPath,
                                                               @RequestParam(required = false) String size) {
-        if(!fileRepository.getResource(imageRelPath).exists()){
-            return getFluxResponseEntity(HttpStatus.NOT_FOUND, "The image was not found");
-        }
-        if (size == null) {
-            return streamFileAsFluxResponseEntity(Mono.just(imageRelPath));
-        }
-        Optional<int[]> sizeXYOpt = parseSize(size);
-        if (!sizeXYOpt.isPresent()) {
-            return (getFluxResponseEntity(HttpStatus.BAD_REQUEST,
-                    "The size query param should be like 300x400 and max(w,h)<"+maxSizeForResize));
-        }
-        int[] xy = sizeXYOpt.get();
-        int x = xy[0];
-        int y = xy[1];
-        if (Math.max(x, y) >= maxSizeForResize) {
-            return (getFluxResponseEntity(HttpStatus.BAD_REQUEST,
-                    "The size query param should be like 300x400 and max(w,h)<"+maxSizeForResize));
-        }
-        File resizedFile = imageResizing.resizedFile(imageRelPath, x, y);
-        if (resizedFile.exists()) {
-            return streamFileAsFluxResponseEntity(Mono.fromSupplier(resizedFile::toPath));
-        }
-        if (Runtime.getRuntime().freeMemory() > minFreeBytesForResize) {
-            Mono<Path> scaledPathFlux = imageResizing.scale(imageRelPath, x, y);
-            return streamFileAsFluxResponseEntity(scaledPathFlux);
+        return blockingExecution.scheduleBlockingMono(()-> {
+            if (!fileRepository.getResource(imageRelPath).exists()) {
+                return getFluxResponseEntity(HttpStatus.NOT_FOUND, "The image was not found");
+            }
+            if (size == null) {
+                return streamFileAsFluxResponseEntity(Mono.just(imageRelPath));
+            }
+            Optional<int[]> sizeXYOpt = parseSize(size);
+            if (!sizeXYOpt.isPresent()) {
+                return (getFluxResponseEntity(HttpStatus.BAD_REQUEST,
+                        "The size query param should be like 300x400 and max(w,h)<" + maxSizeForResize));
+            }
+            int[] xy = sizeXYOpt.get();
+            int x = xy[0];
+            int y = xy[1];
+            if (Math.max(x, y) >= maxSizeForResize) {
+                return (getFluxResponseEntity(HttpStatus.BAD_REQUEST,
+                        "The size query param should be like 300x400 and max(w,h)<" + maxSizeForResize));
+            }
+            File resizedFile = imageResizing.resizedFile(imageRelPath, x, y);
+            if (resizedFile.exists()) {
+                return streamFileAsFluxResponseEntity(Mono.fromSupplier(resizedFile::toPath));
+            }
+            if (isEnoughMemory()) {
+                Mono<Path> scaledPathFlux = imageResizing.scale(imageRelPath, x, y);
+                return streamFileAsFluxResponseEntity(scaledPathFlux);
+            } else {
+                return (getFluxResponseEntity(HttpStatus.SERVICE_UNAVAILABLE,
+                        "The server does not have enough resources to do image resizing at the moment, please retry in a few minutes"));
+            }
+        });
+    }
+
+    private boolean isEnoughMemory() {
+        Supplier<Boolean> isItEnough = () -> Runtime.getRuntime().freeMemory() > minFreeBytesForResize;
+        if (isItEnough.get()) {
+            return true;
         } else {
-            return (getFluxResponseEntity(HttpStatus.SERVICE_UNAVAILABLE,
-                    "The server does not have enough memory to process image resizing at the moment"));
+            System.gc();
+            return isItEnough.get();
         }
     }
 
@@ -107,7 +123,7 @@ public class ImageReactiveController {
     }
 
     private boolean isOnlyDigits(String str) {
-        return str.matches("[0-9]+");
+        return digitsPattern.matcher(str).matches();
     }
 
     private MediaType getContentType(Path path) {

@@ -25,8 +25,6 @@ import java.util.Optional;
 
 @RestController
 public class ImageReactiveController {
-
-    private final Logger logger = LoggerFactory.getLogger(getClass());
     private final FileRepository fileRepository;
     private final ImageResizing imageResizing;
     private final DataBufferFactory dataBufferFactory;
@@ -45,33 +43,37 @@ public class ImageReactiveController {
     }
 
     @GetMapping(path = "/image/{path}")
-    public Mono<ResponseEntity<Flux<DataBuffer>>> streamImage(@PathVariable(name = "path") Path imagePath,
+    public Mono<ResponseEntity<Flux<DataBuffer>>> streamImage(@PathVariable(name = "path") Path imageRelPath,
                                                               @RequestParam(required = false) String size) {
-
-        if (size != null) {
-            Optional<int[]> sizeXYOpt = parseSize(size);
-            if (sizeXYOpt.isPresent()) {
-                int[] xy = sizeXYOpt.get();
-                int x = xy[0];
-                int y = xy[1];
-                if (Math.max(x, y) < maxSizeForResize) {
-                    File resizedFile = imageResizing.resizedFile(imagePath, x, y);
-                    if (resizedFile.exists()) {
-                        return streamFileAsFluxResponseEntity(Mono.fromSupplier(resizedFile::toPath));
-                    }
-                    if (Runtime.getRuntime().freeMemory() > minFreeBytesForResize) {
-                        Mono<Path> scaledPathFlux = imageResizing.scale(imagePath, x, y);
-                        return streamFileAsFluxResponseEntity(scaledPathFlux);
-                    } else {
-                        return Mono.just(getFluxResponseEntity(HttpStatus.SERVICE_UNAVAILABLE,
-                                "The server does not have enough memory to process image resizing at the moment"));
-                    }
-                }
-            }
-            return Mono.just(getFluxResponseEntity(HttpStatus.BAD_REQUEST,
+        if(!fileRepository.getResource(imageRelPath).exists()){
+            return getFluxResponseEntity(HttpStatus.NOT_FOUND, "The image was not found");
+        }
+        if (size == null) {
+            return streamFileAsFluxResponseEntity(Mono.just(imageRelPath));
+        }
+        Optional<int[]> sizeXYOpt = parseSize(size);
+        if (!sizeXYOpt.isPresent()) {
+            return (getFluxResponseEntity(HttpStatus.BAD_REQUEST,
                     "The size query param should be like 300x400 and max(w,h)<"+maxSizeForResize));
         }
-        return streamFileAsFluxResponseEntity(Mono.just(imagePath));
+        int[] xy = sizeXYOpt.get();
+        int x = xy[0];
+        int y = xy[1];
+        if (Math.max(x, y) >= maxSizeForResize) {
+            return (getFluxResponseEntity(HttpStatus.BAD_REQUEST,
+                    "The size query param should be like 300x400 and max(w,h)<"+maxSizeForResize));
+        }
+        File resizedFile = imageResizing.resizedFile(imageRelPath, x, y);
+        if (resizedFile.exists()) {
+            return streamFileAsFluxResponseEntity(Mono.fromSupplier(resizedFile::toPath));
+        }
+        if (Runtime.getRuntime().freeMemory() > minFreeBytesForResize) {
+            Mono<Path> scaledPathFlux = imageResizing.scale(imageRelPath, x, y);
+            return streamFileAsFluxResponseEntity(scaledPathFlux);
+        } else {
+            return (getFluxResponseEntity(HttpStatus.SERVICE_UNAVAILABLE,
+                    "The server does not have enough memory to process image resizing at the moment"));
+        }
     }
 
     private Mono<ResponseEntity<Flux<DataBuffer>>> streamFileAsFluxResponseEntity(Mono<Path> pathFlux) {
@@ -94,14 +96,14 @@ public class ImageReactiveController {
         }
     }
 
-    private ResponseEntity<Flux<DataBuffer>> getFluxResponseEntity(HttpStatus httpStatus, String body) {
+    private Mono<ResponseEntity<Flux<DataBuffer>>> getFluxResponseEntity(HttpStatus httpStatus, String body) {
         DataBuffer dataBuffer =
                 dataBufferFactory
                         .allocateBuffer()
                         .write(body//json? service to service?
                                 .getBytes(StandardCharsets.UTF_8));
-        return ResponseEntity.status(httpStatus).body(
-                Flux.fromIterable(Collections.singletonList(dataBuffer)));
+        return Mono.just(ResponseEntity.status(httpStatus).body(
+                Flux.fromIterable(Collections.singletonList(dataBuffer))));
     }
 
     private boolean isOnlyDigits(String str) {

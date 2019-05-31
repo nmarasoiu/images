@@ -1,5 +1,7 @@
 package com.image.server;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.buffer.DataBuffer;
@@ -10,6 +12,7 @@ import reactor.core.publisher.Flux;
 import java.nio.file.Path;
 
 public class DefaultFileRepository implements FileRepository {
+    private final Logger logger = LoggerFactory.getLogger(getClass());
     private final Path basePath;
     private final int bufferSize;
     private final DataBufferFactory bufferFactory;
@@ -26,6 +29,8 @@ public class DefaultFileRepository implements FileRepository {
     }
 
     public Resource getResource(Path relPath) {
-        return new FileSystemResource(basePath.resolve(relPath));
+        Path filePath = basePath.resolve(relPath);
+        logger.debug("basePath={}, relPath={}, filePath={}", basePath, relPath, filePath);
+        return new FileSystemResource(filePath);
     }
 }

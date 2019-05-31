@@ -9,9 +9,6 @@ import org.springframework.core.io.buffer.DataBufferFactory;
 import org.springframework.core.io.buffer.DefaultDataBufferFactory;
 import reactor.core.scheduler.Schedulers;
 
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.Optional;
 import java.util.concurrent.Executors;
 
 import static java.lang.System.getenv;
@@ -20,25 +17,23 @@ import static java.lang.System.getenv;
 public class ServerApplication {
     private final static Logger logger = LoggerFactory.getLogger(ServerApplication.class);
 
-    private Path basePath = Paths.get(
-            Optional
-                    .ofNullable(getenv("BASE_PATH"))
-                    .orElseThrow(() -> new NullPointerException("BASE_PATH env var is necessary: the root of images folder")));
+    private final Config config;
 
-    private int bufferSize = Optional
-            .ofNullable(getenv("BUFFER_BYTE_SIZE"))
-            .map(Integer::new)
-            .orElse(16384);
+    public ServerApplication(Config config) {
+        this.config = config;
+    }
 
     @Bean
     public ImageResizing imageResizing() {
         int resizingThreadCount = Runtime.getRuntime().availableProcessors();
-        return new DefaultImageResizing(basePath, Schedulers.fromExecutorService(Executors.newFixedThreadPool(resizingThreadCount)));
+        return new DefaultImageResizing(
+                config.getBasePath(),
+                Schedulers.fromExecutorService(Executors.newFixedThreadPool(resizingThreadCount)));
     }
 
     @Bean
     public FileRepository imageRepository(DataBufferFactory dataBufferFactory) {
-        return new DefaultFileRepository(basePath, bufferSize, dataBufferFactory);
+        return new DefaultFileRepository(config.getBasePath(), config.getBufferSize(), dataBufferFactory);
     }
 
     @Bean

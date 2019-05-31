@@ -19,6 +19,12 @@ Alternatively, before starting a resize, a memory check can be done to estimate 
  the resize would entail in memory, if we have enough memory to leave also free space, and if not, delay
  and eventually return an Http status explaining to the client that the server is overloaded.
 
+Configs: as OS env vars:
+BASE_PATH=the root folder with static images, e.g. /Users/nicu/Downloads
+BUFFER_BYTE_SIZE=the amount of bytes in a batch of bytes from disk to the http client e.g. 1024
+MAX_SIZE_FOR_RESIZE=the maximum length or height acceptable by the server to engage in a resize operation
+MIN_FREE_BYTES_FOR_RESIZE=the minimum amount of free memory in bytes that the server requires in order to engage in resize
+
 Done:
 - free memory check before resize
 - max w and h to do a resize

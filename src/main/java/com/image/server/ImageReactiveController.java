@@ -2,6 +2,7 @@ package com.image.server;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferFactory;
 import org.springframework.http.HttpStatus;
@@ -15,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Arrays;
@@ -28,15 +30,22 @@ public class ImageReactiveController {
     private final FileRepository fileRepository;
     private final ImageResizing imageResizing;
     private final DataBufferFactory dataBufferFactory;
+    private final int maxSizeForResize;
+    private final int minFreeBytesForResize;
 
-    public ImageReactiveController(FileRepository fileRepository, ImageResizing imageResizing, DataBufferFactory dataBufferFactory) {
+    public ImageReactiveController(FileRepository fileRepository, ImageResizing imageResizing,
+                                   DataBufferFactory dataBufferFactory,
+                                   @Value("${maxSizeForResize:4500}") int maxSizeForResize,
+                                   @Value("${minFreeBytesForResize:134217728}") int minFreeBytesForResize) {
         this.fileRepository = fileRepository;
         this.imageResizing = imageResizing;
         this.dataBufferFactory = dataBufferFactory;
+        this.maxSizeForResize = maxSizeForResize;
+        this.minFreeBytesForResize = minFreeBytesForResize;
     }
 
     @GetMapping(path = "/image/{path}")
-    public Mono<ResponseEntity<Flux<DataBuffer>>> streamImage(@PathVariable Path path,
+    public Mono<ResponseEntity<Flux<DataBuffer>>> streamImage(@PathVariable(name = "path") Path imagePath,
                                                               @RequestParam(required = false) String size) {
 
         if (size != null) {
@@ -45,14 +54,24 @@ public class ImageReactiveController {
                 int[] xy = sizeXYOpt.get();
                 int x = xy[0];
                 int y = xy[1];
-                if (Math.max(x, y) < 4500) {
-                    Mono<Path> scaledPathFlux = imageResizing.scale(path, x, y);
-                    return streamFileAsFluxResponseEntity(scaledPathFlux);
+                if (Math.max(x, y) < maxSizeForResize) {
+                    File resizedFile = imageResizing.resizedFile(imagePath, x, y);
+                    if (resizedFile.exists()) {
+                        return streamFileAsFluxResponseEntity(Mono.fromSupplier(resizedFile::toPath));
+                    }
+                    if (Runtime.getRuntime().freeMemory() > minFreeBytesForResize) {
+                        Mono<Path> scaledPathFlux = imageResizing.scale(imagePath, x, y);
+                        return streamFileAsFluxResponseEntity(scaledPathFlux);
+                    } else {
+                        return Mono.just(getFluxResponseEntity(HttpStatus.SERVICE_UNAVAILABLE,
+                                "The server does not have enough memory to process image resizing at the moment"));
+                    }
                 }
             }
-            return Mono.just(badReqEntity());
+            return Mono.just(getFluxResponseEntity(HttpStatus.BAD_REQUEST,
+                    "The size query param should be like 300x400 and max(w,h)<"+maxSizeForResize));
         }
-        return streamFileAsFluxResponseEntity(Mono.just(path));
+        return streamFileAsFluxResponseEntity(Mono.just(imagePath));
     }
 
     private Mono<ResponseEntity<Flux<DataBuffer>>> streamFileAsFluxResponseEntity(Mono<Path> pathFlux) {
@@ -75,13 +94,13 @@ public class ImageReactiveController {
         }
     }
 
-    private ResponseEntity<Flux<DataBuffer>> badReqEntity() {
+    private ResponseEntity<Flux<DataBuffer>> getFluxResponseEntity(HttpStatus httpStatus, String body) {
         DataBuffer dataBuffer =
                 dataBufferFactory
                         .allocateBuffer()
-                        .write("The size query param should be like 300x400"//json? service to service?
+                        .write(body//json? service to service?
                                 .getBytes(StandardCharsets.UTF_8));
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
+        return ResponseEntity.status(httpStatus).body(
                 Flux.fromIterable(Collections.singletonList(dataBuffer)));
     }
 

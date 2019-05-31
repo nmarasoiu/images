@@ -18,3 +18,12 @@ To be studied if a constant memory is possible.
 Alternatively, before starting a resize, a memory check can be done to estimate if given the file size on disk and what
  the resize would entail in memory, if we have enough memory to leave also free space, and if not, delay
  and eventually return an Http status explaining to the client that the server is overloaded.
+
+Done:
+- free memory check before resize
+- max w and h to do a resize
+
+To Do:
+- distributed/replicated NFS-mountable filesystem
+- establish a JSON/XML schema e.g. GraphQL if this is machine to machine communication
+- profile the server under load

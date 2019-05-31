@@ -37,30 +37,33 @@ public class ImageReactiveController {
 
     @GetMapping(path = "/image/{path}")
     public Mono<ResponseEntity<Flux<DataBuffer>>> streamImage(@PathVariable Path path,
-                                                        @RequestParam(required = false) String size) {
+                                                              @RequestParam(required = false) String size) {
 
         if (size != null) {
             Optional<int[]> sizeXYOpt = parseSize(size);
             if (sizeXYOpt.isPresent()) {
                 int[] xy = sizeXYOpt.get();
-                Mono<Path> scaledPathFlux = imageResizing.scale(path, xy[0], xy[1]);
-                return streamFileAsFluxResponseEntity(scaledPathFlux);
-            } else {
-                return Mono.just(badReqEntity());
+                int x = xy[0];
+                int y = xy[1];
+                if (Math.max(x, y) < 4500) {
+                    Mono<Path> scaledPathFlux = imageResizing.scale(path, x, y);
+                    return streamFileAsFluxResponseEntity(scaledPathFlux);
+                }
             }
+            return Mono.just(badReqEntity());
         }
         return streamFileAsFluxResponseEntity(Mono.just(path));
     }
 
     private Mono<ResponseEntity<Flux<DataBuffer>>> streamFileAsFluxResponseEntity(Mono<Path> pathFlux) {
         return pathFlux
-                    .map(path -> {
-                        Flux<DataBuffer> imageStream = fileRepository.readImageFromDisk(path);
-                        return ResponseEntity
-                                .status(HttpStatus.OK)
-                                .contentType(getContentType(path))
-                                .body(imageStream);
-                    });
+                .map(path -> {
+                    Flux<DataBuffer> imageStream = fileRepository.readImageFromDisk(path);
+                    return ResponseEntity
+                            .status(HttpStatus.OK)
+                            .contentType(getContentType(path))
+                            .body(imageStream);
+                });
     }
 
     private Optional<int[]> parseSize(@RequestParam(required = false) String size) {
@@ -76,7 +79,7 @@ public class ImageReactiveController {
         DataBuffer dataBuffer =
                 dataBufferFactory
                         .allocateBuffer()
-                        .write("The size query param should be like 300x400"
+                        .write("The size query param should be like 300x400"//json? service to service?
                                 .getBytes(StandardCharsets.UTF_8));
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
                 Flux.fromIterable(Collections.singletonList(dataBuffer)));
